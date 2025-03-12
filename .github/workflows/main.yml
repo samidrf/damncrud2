@@ -1,0 +1,159 @@
+name: CI/CD Selenium Test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      mariadb:
+        image: mariadb:10.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: damncrud
+          MYSQL_USER: user
+          MYSQL_PASSWORD: password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 --password=root || exit 1"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget unzip curl php php-mysqli php-cli apache2 jq
+          python -m pip install --upgrade pip
+          pip install selenium pytest pytest-xdist pytest-html
+      - name: Persiapkan Gambar untuk Test
+        run: |
+          mkdir -p helper
+          # Buat dummy image untuk pengujian
+          convert -size 100x100 xc:blue helper/pp_baru.jpg || true
+          # Jika convert tidak tersedia, gunakan alternative
+          if [ ! -f helper/pp_baru.jpg ]; then
+            echo "Creating dummy image with dd"
+            dd if=/dev/urandom of=helper/pp_baru.jpg bs=1024 count=10
+          fi
+          ls -la helper/
+      - name: Start Apache Server
+        run: |
+          sudo cp -r . /var/www/html/damncrud
+          sudo chown -R www-data:www-data /var/www/html/damncrud
+          sudo systemctl restart apache2
+          sudo systemctl enable apache2
+      - name: Wait for MariaDB to be fully ready
+        run: |
+          for i in {1..40}; do
+            if mysql -h 127.0.0.1 --protocol=tcp -u root --password=root -e 'SHOW DATABASES;' &> /dev/null; then
+              echo "MariaDB is ready!"
+              exit 0
+            fi
+            echo "Waiting for MariaDB..."
+            sleep 2
+          done
+          echo "MariaDB did not start in time" >&2
+          exit 1
+      - name: Import database schema
+        run: |
+          # Pastikan file DB ada, jika tidak buat database minimal
+          if [ -f db/damncrud.sql ]; then
+            mysql -h 127.0.0.1 --protocol=tcp -u root --password=root damncrud < db/damncrud.sql
+          else
+            # Buat tabel users dan contacts minimal
+            mysql -h 127.0.0.1 --protocol=tcp -u root --password=root damncrud -e "
+              CREATE TABLE IF NOT EXISTS users (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                username VARCHAR(50) NOT NULL,
+                password VARCHAR(255) NOT NULL,
+                profile_pic VARCHAR(255) DEFAULT 'default.jpg'
+              );
+              INSERT INTO users (username, password) VALUES ('admin', 'nimda666!');
+              
+              CREATE TABLE IF NOT EXISTS contacts (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                email VARCHAR(255) NOT NULL,
+                phone VARCHAR(50),
+                title VARCHAR(100)
+              );
+              INSERT INTO contacts (name, email, phone, title) VALUES 
+                ('Test Contact', 'test@example.com', '123456789', 'Developer');
+            "
+          fi
+      - name: Wait for Apache to be ready
+        run: |
+          for i in {1..30}; do
+            if curl -s http://localhost/damncrud/login.php &> /dev/null; then
+              echo "Apache is ready!"
+              exit 0
+            fi
+            echo "Waiting for Apache..."
+            sleep 2
+          done
+          echo "Apache did not start in time" >&2
+          exit 1
+      - name: Debug Apache Accessibility
+        run: |
+          curl -v http://localhost/damncrud/login.php || echo "Apache not accessible"
+      - name: Start Selenium Grid
+        run: |
+          docker run -d --network=host --name selenium-grid selenium/standalone-chrome:latest
+          sleep 10
+      - name: Debug Running Containers
+        run: docker ps -a
+
+      - name: Check Selenium Logs if Fails
+        run: docker logs selenium-grid || true
+
+      - name: Wait for Selenium Grid to be ready
+        run: |
+          for i in {1..40}; do
+            if curl -s http://localhost:4444/wd/hub/status | jq -e '.value.ready == true' &> /dev/null; then
+              echo "Selenium Grid is ready!"
+              exit 0
+            fi
+            echo "Waiting for Selenium Grid..."
+            sleep 5
+          done
+          echo "Selenium Grid did not start in time" >&2
+          docker logs selenium-grid
+          exit 1
+      - name: Sesuaikan Path File untuk CI/CD
+        run: |
+          sed -i 's|r"C:\\Storage\\Apk\\Database\\MySQL\\XAMPP\\htdocs\\damncrud\\helper\\pp_baru.jpg"|"/var/www/html/damncrud/helper/pp_baru.jpg"|g' test/test_selenium.py
+      - name: Verify Pytest Test Discovery
+        run: pytest test/ --collect-only
+
+      - name: List Test Directory (Debugging)
+        run: ls -R test/
+
+      - name: Run Selenium Tests in Parallel
+        run: pytest test/test_selenium.py -v --html=test-report.html --self-contained-html -n 4
+
+      - name: Upload Test Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: selenium-test-report
+          path: test-report.html
+
+      - name: Debug Selenium Grid Logs on Failure
+        if: failure()
+        run: docker logs selenium-grid || true
