@@ -1,28 +1,39 @@
 import pytest
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
 import time
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.chrome.options import Options
 
-# Fixture untuk mengatur browser
+
 @pytest.fixture
 def browser():
     options = Options()
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('--headless')  # Penting untuk lingkungan CI
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=options)
-    driver.maximize_window()
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+
+    driver = webdriver.Remote(
+        command_executor='http://localhost:4444/wd/hub',
+        options=options
+    )
+    driver.implicitly_wait(5)
+
     yield driver
     driver.quit()
 
-# Test 1: Login dan logout dari sistem
-def test_login_logout(browser):
+
+def login(browser, username, password):
+    """Fungsi login agar bisa digunakan ulang di berbagai test case."""
+    browser.get("http://localhost/damncrud/login.php")
+    browser.find_element(By.NAME, "username").send_keys(username)
+    browser.find_element(By.NAME, "password").send_keys(password)
+    browser.find_element(By.CLASS_NAME, "btn-danger").click()
+    time.sleep(2)
+
+
+def test_01_login_logout(browser):
+    """TC1: Login dan logout dari sistem"""
     # 1. Buka halaman login
     browser.get("http://localhost/damncrud/login.php")
     
@@ -46,14 +57,11 @@ def test_login_logout(browser):
     current_url = browser.current_url
     assert "login.php" in current_url
 
-# Test 2: Menambahkan kontak baru
-def test_add_new_contact(browser):
+
+def test_02_add_new_contact(browser):
+    """TC2: Menambahkan kontak baru"""
     # 1. Login ke sistem
-    browser.get("http://localhost/damncrud/login.php")
-    browser.find_element(By.NAME, "username").send_keys("admin")
-    browser.find_element(By.NAME, "password").send_keys("nimda666!")
-    browser.find_element(By.CLASS_NAME, "btn-danger").click()
-    time.sleep(2)
+    login(browser, "admin", "nimda666!")
     
     # 2. Klik tombol "Add New Contact"
     browser.find_element(By.LINK_TEXT, "Add New Contact").click()
@@ -72,14 +80,11 @@ def test_add_new_contact(browser):
     current_url = browser.current_url
     assert "index.php" in current_url
 
-# Test 3: Menghapus kontak dari list
-def test_delete_contact(browser):
+
+def test_03_delete_contact(browser):
+    """TC3: Menghapus kontak dari list"""
     # 1. Login ke sistem
-    browser.get("http://localhost/damncrud/login.php")
-    browser.find_element(By.NAME, "username").send_keys("admin")
-    browser.find_element(By.NAME, "password").send_keys("nimda666!")
-    browser.find_element(By.CLASS_NAME, "btn-danger").click()
-    time.sleep(2)
+    login(browser, "admin", "nimda666!")
     
     # 2. Klik tombol "delete" pada list row pertama
     # Menggunakan XPath untuk menargetkan tombol delete pada baris pertama
@@ -95,21 +100,18 @@ def test_delete_contact(browser):
     current_url = browser.current_url
     assert "index.php" in current_url
 
-# Test 4: Mengubah foto profil
-def test_change_profile_picture(browser):
+
+def test_04_change_profile_picture(browser):
+    """TC4: Mengubah foto profil"""
     # 1. Login ke sistem
-    browser.get("http://localhost/damncrud/login.php")
-    browser.find_element(By.NAME, "username").send_keys("admin")
-    browser.find_element(By.NAME, "password").send_keys("nimda666!")
-    browser.find_element(By.CLASS_NAME, "btn-danger").click()
-    time.sleep(2)
+    login(browser, "admin", "nimda666!")
     
     # 2. Klik tombol "profil"
     browser.find_element(By.CLASS_NAME, "btn-primary").click()
     
     # 3. Memilih file yang sudah disediakan
     file_input = browser.find_element(By.NAME, "image")
-    file_path = r"./helper/pp_baru.jpg"  # Gunakan path relatif untuk CI/CD
+    file_path = r"C:\Storage\Apk\Database\MySQL\XAMPP\htdocs\damncrud\helper\pp_baru.jpg"
     file_input.send_keys(file_path)
     
     # 4. Klik tombol "Change"
@@ -120,49 +122,46 @@ def test_change_profile_picture(browser):
     current_url = browser.current_url
     assert "profil.php" in current_url
 
-# Test 5: Mengedit kontak
-def test_edit_contact(browser):
+
+def test_05_edit_contact(browser):
+    """TC5: Mengedit kontak"""
     # 1. Login ke sistem
-    browser.get("http://localhost/damncrud/login.php")
-    browser.find_element(By.NAME, "username").send_keys("admin")
-    browser.find_element(By.NAME, "password").send_keys("nimda666!")
-    browser.find_element(By.CLASS_NAME, "btn-danger").click()
-    time.sleep(2)
-        
+    login(browser, "admin", "nimda666!")
+    
     # 2. Cari dan klik tombol edit dengan cara yang lebih spesifik
     # Cari bagian actions pada baris pertama
     actions_section = browser.find_element(By.XPATH, "//tr[@role='row'][1]//td[contains(@class, 'actions')]")
     # Cari tombol edit di dalam bagian actions tersebut
     update_button = actions_section.find_element(By.XPATH, ".//a[contains(@class, 'btn-success')]")
     update_button.click()
-        
+    
     # Verifikasi: Sudah masuk ke halaman update.php
     time.sleep(1)
     current_url = browser.current_url
     assert "update.php" in current_url
-        
+    
     # 3. Mengisi form yang sudah disediakan
     # Membersihkan field terlebih dahulu
     name_field = browser.find_element(By.NAME, "name")
     name_field.clear()
     name_field.send_keys("Samid")
-        
+    
     email_field = browser.find_element(By.NAME, "email")
     email_field.clear()
     email_field.send_keys("samid.123@example.com")
-        
+    
     # Field phone tidak perlu di-clear karena di form memang kosong (value="")
     phone_field = browser.find_element(By.NAME, "phone")
     phone_field.send_keys("987654321")
-        
+    
     title_field = browser.find_element(By.NAME, "title")
     title_field.clear()
     title_field.send_keys("Programer")
-        
+    
     # 4. Klik tombol "update"
     browser.find_element(By.CSS_SELECTOR, "input[type='submit']").click()
-        
+    
     time.sleep(2)
     # Verifikasi: Redirect ke index.php
     current_url = browser.current_url
-    assert ("index.php", current_url)
+    assert "index.php" in current_url
