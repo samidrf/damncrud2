@@ -111,7 +111,7 @@ def test_04_change_profile_picture(browser):
     
     # 3. Memilih file yang sudah disediakan
     file_input = browser.find_element(By.NAME, "image")
-    file_path = r"C:\Storage\Apk\Database\MySQL\XAMPP\htdocs\damncrud\helper\pp_baru.jpg"
+    file_path = "/github/workspace/helper/pp_baru.jpg"
     file_input.send_keys(file_path)
     
     # 4. Klik tombol "Change"
