@@ -1,5 +1,7 @@
 import pytest
 import time
+import os
+import socket
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -9,6 +11,24 @@ from selenium.webdriver.support import expected_conditions as EC
 
 # Konfigurasi basis URL - penting untuk CI/CD
 BASE_URL = "http://localhost/damncrud"
+
+# Fungsi untuk memeriksa apakah server berjalan
+def is_server_running():
+    try:
+        # Coba buka koneksi ke server
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(2)  # timeout 2 detik
+        sock.connect(('localhost', 80))
+        sock.close()
+        return True
+    except:
+        return False
+
+# Skip semua test jika server tidak berjalan
+pytestmark = pytest.mark.skipif(
+    not is_server_running() or os.environ.get('CI') == 'true', 
+    reason="Server tidak berjalan atau berjalan di lingkungan CI"
+)
 
 @pytest.fixture
 def browser():
